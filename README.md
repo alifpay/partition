@@ -28,14 +28,44 @@
 
 ## Файлы в репозитории
 
-- `partition.sql` – пример SQL-скрипта для настройки партиционирования в TimescaleDB.
+- `partition.sql` – базовый пример партиционирования с TimescaleDB.
+- `txn.sql` / `txn.md` – партиционирование таблицы транзакций (платёжные заказы) с примерами запросов.
+- `services.sql` / `services.md` – партиционирование таблицы платёжных сервисов с JSONB и segmentby.
+- `view.sql` / `view.md` – материализованные представления и continuous aggregates.
+- `tips.md` – советы по высокопроизводительной вставке данных через COPY FROM.
 - `README.md` – это описание.
 
 ## Требования
 
-- PostgreSQL (поддерживаемая верcия TimescaleDB).
+- PostgreSQL (поддерживаемая версия TimescaleDB).
 - Расширение TimescaleDB, установленное и включённое в вашей базе.
 
-TODO:   
-CREATE MATERIALIZED VIEW with continuous aggregates.  
-More info and examples about columnstore
+## Быстрый старт
+
+Можете развернуть TimescaleDB локально (dev) с помощью Docker:
+
+```bash
+docker run --name timescale-test \
+  -e POSTGRES_PASSWORD=pass123 \
+  -p 5432:5432 \
+  -d timescale/timescaledb:latest-pg18
+```
+
+Подключитесь к базе:
+
+```bash
+psql -h localhost -U postgres -d postgres
+```
+
+Включите расширение TimescaleDB:
+
+```sql
+\dx;
+```
+
+Теперь можете выполнять SQL-скрипты из репозитория и экспериментировать с партиционированием.
+
+## TODO
+
+- [ ] Добавить примеры CREATE MATERIALIZED VIEW с continuous aggregates
+- [ ] Больше примеров и объяснений про columnstore сжатие
