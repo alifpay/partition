@@ -36,6 +36,6 @@
 - PostgreSQL (поддерживаемая верcия TimescaleDB).
 - Расширение TimescaleDB, установленное и включённое в вашей базе.
 
-TODO: 
+TODO:   
 CREATE MATERIALIZED VIEW with continuous aggregates.  
 More info and examples about columnstore
