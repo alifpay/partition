@@ -44,10 +44,16 @@ func main() {
 	// }
 
 	// Вставка 10 миллионов платежных ордеров
-	if err := BatchInsertPaymentOrders(10000000, 2000000); err != nil {
-		log.Fatal("BatchInsertPaymentOrders:", err)
-	}
+	//if err := BatchInsertPaymentOrders(10000000, 2000000); err != nil {
+	//	log.Fatal("BatchInsertPaymentOrders:", err)
+	//}
 
+	// Выполнение параллельных транзакций
+	go run1(ctx, 48, 47, 20.00, "RUB")
+	go run1(ctx, 47, 50, 100.00, "RUB")
+
+	//RunParallelTransactions(10, 50, 5000)
+	time.Sleep(5 * time.Second)
 	log.Println("Готово!")
 }
 
@@ -247,4 +253,146 @@ func BatchInsertPaymentOrders(count int, maxAccountID int64) error {
 
 	log.Printf("Вставка %d платежных ордеров завершена за %v", count, time.Since(start))
 	return nil
+}
+
+// doSingleTransfer выполняет одну транзакцию перевода между счетами
+func doSingleTransfer(ctx context.Context, tx pgx.Tx, senderID, beneficiaryID int64, amount float64, currency string) error {
+	// Проверим, что счета разные
+	if senderID == beneficiaryID {
+		return fmt.Errorf("sender and beneficiary are the same: %d", senderID)
+	}
+
+	// Обновляем балансы
+	cmd, err := tx.Exec(ctx, `
+        UPDATE accounts
+        SET balance = balance - $1
+        WHERE id = $2 AND currency_code = $3 AND balance >= $1
+    `, amount, senderID, currency)
+	if err != nil {
+		return fmt.Errorf("debit sender: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return fmt.Errorf("insufficient funds or account not found for sender: %d", senderID)
+	}
+
+	cmd, err = tx.Exec(ctx, `
+        UPDATE accounts
+        SET balance = balance + $1
+        WHERE id = $2 AND currency_code = $3
+    `, amount, beneficiaryID, currency)
+	if err != nil {
+		return fmt.Errorf("credit beneficiary: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return fmt.Errorf("account not found for beneficiary: %d", beneficiaryID)
+	}
+
+	// Вставляем запись в payment_orders (одна операция)
+	createdAt := time.Now()
+	orderDate := createdAt.Truncate(24 * time.Hour)
+	scheduledDate := createdAt.AddDate(0, 0, rand.Intn(3)) // до 3 дней
+	status := int16(3)                                     // допустим 'completed'
+	referenceNumber := fmt.Sprintf("TX-%d-%d", createdAt.UnixNano(), rand.Intn(1_000_000))
+	paymentMethod := "transfer"
+
+	cmd, err = tx.Exec(ctx, `
+        INSERT INTO payment_orders(
+            created_at, updated_at, scheduled_execution_date, order_date,
+            sender_account_id, beneficiary_account_id,
+            amount, status, currency_code, reference_number, payment_method
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `, createdAt, createdAt, scheduledDate, orderDate,
+		senderID, beneficiaryID,
+		amount, status, currency, referenceNumber, paymentMethod)
+	if err != nil {
+		return fmt.Errorf("insert payment_order: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return fmt.Errorf("failed to insert payment_order")
+	}
+
+	return nil
+}
+
+// workerTransactions — воркер, который выполняет много транзакций подряд
+func workerTransactions(id int, totalOps int, maxAccountID int64, currencies []string) {
+	ctx := context.Background()
+	for i := 0; i < totalOps; i++ {
+		// выбираем случайные счета и параметры
+		senderID := int64(1 + rand.Intn(int(maxAccountID)))
+		beneficiaryID := int64(1 + rand.Intn(int(maxAccountID)))
+		amount := float64(1+rand.Intn(10_000)) + rand.Float64()
+		currency := currencies[rand.Intn(len(currencies))]
+
+		err := func() error {
+			tx, err := masterDB.BeginTx(ctx, pgx.TxOptions{})
+			if err != nil {
+				return fmt.Errorf("begin tx: %w", err)
+			}
+			defer tx.Rollback(ctx) // безопасный rollback, commit его переопределит
+
+			if err := doSingleTransfer(ctx, tx, senderID, beneficiaryID, amount, currency); err != nil {
+				return err
+			}
+
+			if err := tx.Commit(ctx); err != nil {
+				return fmt.Errorf("commit: %w", err)
+			}
+			return nil
+		}()
+		if err != nil {
+			// для нагрузки можно просто логировать и продолжать
+			log.Printf("worker %d, op %d error: %v", id, i, err)
+		}
+
+		if (i+1)%1000 == 0 {
+			log.Printf("worker %d finished %d operations", id, i+1)
+		}
+	}
+	log.Printf("worker %d finished all %d operations", id, totalOps)
+}
+
+// RunParallelTransactions запускает несколько горутин с транзакционными операциями
+func RunParallelTransactions(workers, opsPerWorker int, maxAccountID int64) {
+	log.Printf("Starting %d workers, %d ops each...", workers, opsPerWorker)
+	currencies := []string{"USD", "EUR", "UZS", "RUB", "TJS"}
+
+	done := make(chan struct{}, workers)
+	for w := 0; w < workers; w++ {
+		go func(id int) {
+			workerTransactions(id, opsPerWorker, maxAccountID, currencies)
+			done <- struct{}{}
+		}(w + 1)
+	}
+
+	for i := 0; i < workers; i++ {
+		<-done
+	}
+	log.Printf("All %d workers finished", workers)
+}
+
+func run1(ctx context.Context, senderID int64, beneficiaryID int64, amount float64, currency string) {
+	tm := time.Now()
+	err := func() error {
+		tx, err := masterDB.BeginTx(ctx, pgx.TxOptions{})
+		if err != nil {
+			return fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(ctx) // безопасный rollback, commit его переопределит
+
+		if err := doSingleTransfer(ctx, tx, senderID, beneficiaryID, amount, currency); err != nil {
+			return err
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit: %w", err)
+		}
+		return nil
+	}()
+	if err != nil {
+		// для нагрузки можно просто логировать и продолжать
+		log.Printf("worker %d, op %f error: %v", senderID, amount, err)
+	}
+	log.Printf("worker %d finished all %f operations in %v", senderID, amount, time.Since(tm))
 }
