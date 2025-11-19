@@ -43,6 +43,10 @@ WITH (
 )
 ```
 
+
+When you create a hypertable using CREATE TABLE ... WITH ..., the default partitioning column is automatically the first column with a timestamp data type. Also, TimescaleDB creates a columnstore policy that automatically converts your data to the columnstore, after an interval equal to the value of the chunk_interval, defined through compress_after in the policy. This columnar format enables fast scanning and aggregation, optimizing performance for analytical workloads while also saving significant storage space. In the columnstore conversion, hypertable chunks are compressed by up to 98%, and organized for efficient, large-scale queries.
+
+
 - **partition_column = 'order_date'** – таблица разбивается на партиции по дате заказа.
 - **segmentby = 'sender_account_id'** – внутри партиций данные дополнительно сегментируются по счёту отправителя (оптимизация для запросов по `sender_account_id`).
 - **orderby = 'order_date DESC'** – строки внутри сегментов хранятся в порядке убывания даты (ускоряет запросы последних заказов).
@@ -147,3 +151,15 @@ CALL add_columnstore_policy('payment_orders', after => INTERVAL '170d');
 - **Платежи остаются доступны** – в отличие от retention policy, данные не удаляются, а просто переводятся в более эффективный формат для хранения и чтения.
 
 Старые платежи (старше ~6 месяцев) обычно не изменяются, только читаются для отчётов и аналитики, поэтому columnstore для них оптимален.
+
+
+```sql
+
+update payment_orders set amount = 57413.22  where order_date = '2025-09-13' and id = '019a9a89-894e-789d-a14c-d056dad9864e';
+UPDATE 1
+Time: 10.477 ms
+update payment_orders set amount = 57413.22  where  id = '019a9a89-894e-789d-a14c-d056dad9864e';
+UPDATE 1
+Time: 56.182 ms
+
+```

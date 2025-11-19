@@ -17,6 +17,7 @@ CREATE TABLE payment_orders(
     tsdb.hypertable,
     tsdb.partition_column = 'order_date',
     tsdb.create_default_indexes = false,
+    --tsdb.enable_columnstore = false,
     tsdb.segmentby        = 'sender_account_id',
     tsdb.orderby          = 'order_date DESC'
 );

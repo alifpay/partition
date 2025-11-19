@@ -43,10 +43,15 @@ WITH (
     tsdb.hypertable,
     tsdb.partition_column = 'pay_date',
     tsdb.create_default_indexes = false,
+    --tsdb.enable_columnstore = false,
     tsdb.segmentby        = 'service_name',
     tsdb.orderby          = 'pay_date DESC'
 )
 ```
+
+
+When you create a hypertable using CREATE TABLE ... WITH ..., the default partitioning column is automatically the first column with a timestamp data type. Also, TimescaleDB creates a columnstore policy that automatically converts your data to the columnstore, after an interval equal to the value of the chunk_interval, defined through compress_after in the policy. This columnar format enables fast scanning and aggregation, optimizing performance for analytical workloads while also saving significant storage space. In the columnstore conversion, hypertable chunks are compressed by up to 98%, and organized for efficient, large-scale queries.
+
 
 - **partition_column = 'pay_date'** – таблица разбивается на партиции по дате платежа.
 - **segmentby = 'service_name'** – внутри партиций данные сегментируются по названию сервиса (оптимизация для запросов по конкретному сервису).
