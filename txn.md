@@ -44,7 +44,7 @@ WITH (
 ```
 
 
-When you create a hypertable using CREATE TABLE ... WITH ..., the default partitioning column is automatically the first column with a timestamp data type. Also, TimescaleDB creates a columnstore policy that automatically converts your data to the columnstore, after an interval equal to the value of the chunk_interval, defined through compress_after in the policy. This columnar format enables fast scanning and aggregation, optimizing performance for analytical workloads while also saving significant storage space. In the columnstore conversion, hypertable chunks are compressed by up to 98%, and organized for efficient, large-scale queries.
+Когда вы создаете гипертаблицу с помощью CREATE TABLE ... WITH ..., столбец партиционирования по умолчанию автоматически становится первым столбцом с типом данных timestamp. Также TimescaleDB создает политику columnstore, которая автоматически преобразует ваши данные в columnstore через интервал, равный значению chunk_interval, определенному через compress_after в политике. Этот колоночный формат обеспечивает быстрое сканирование и агрегацию, оптимизируя производительность для аналитических нагрузок и значительно экономя дисковое пространство. При преобразовании в columnstore чанки гипертаблицы сжимаются до 98% и организуются для эффективных масштабных запросов.
 
 
 - **partition_column = 'order_date'** – таблица разбивается на партиции по дате заказа.

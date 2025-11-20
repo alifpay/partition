@@ -41,10 +41,10 @@ CREATE TABLE payment_orders2(
 );
 ```
 
-batch insert for payment_orders2 took   
+пакетная вставка для payment_orders2 заняла   
 Вставка 10000000 платежных ордеров завершена за 3m3.546634264s
 
-batch insert for payment_orders took.   
+пакетная вставка для payment_orders заняла.   
 Вставка 10000000 платежных ордеров завершена за 2m51.342653237s
 
 
@@ -94,10 +94,10 @@ CREATE INDEX idx_payment_order2_date ON payment_orders2(created_at);
 
 ```
 
-let's create index for created_at
+создадим индекс для created_at
 
 
-after index create the same time
+после создания индекса время выполнения
 
 ```sql
 
@@ -119,7 +119,7 @@ Time: 9411.894 ms (00:09.412)
 ```
 
 
-in partition
+в партиции
 
 ```sql
 
