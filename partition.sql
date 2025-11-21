@@ -14,21 +14,7 @@ CREATE TABLE user_audit_log (
 CREATE INDEX idx_user_action
     ON user_audit_log(action, user_id, created_at);
 
--- audit log for user actions with columnstore
-CREATE TABLE user_audit_log_columnstore (
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    action SMALLINT NOT NULL,
-    user_id TEXT NOT NULL,
-    details JSONB
-) WITH (
-    tsdb.hypertable,
-    tsdb.partition_column = 'created_at',
-    tsdb.columnstore      = true,
-    tsdb.segmentby        = 'user_id',
-    tsdb.orderby          = 'created_at DESC'
-);
-
-insert into user_audit_log_columnstore (action, user_id, details)
+insert into user_audit_log(action, user_id, details)
 values 
 (1, 'user_123', '{"login": "successful"}'),
 (2, 'user_456', '{"file_upload": "document.pdf"}'),
