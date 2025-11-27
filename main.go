@@ -34,9 +34,9 @@ func main() {
 	// Раскомментируйте для запуска:
 
 	// Вставка 1 миллион клиентов
-	// if err := BatchInsertCustomers(1000000); err != nil {
-	// 	log.Fatal("BatchInsertCustomers:", err)
-	// }
+	//if err := BatchInsertCustomers(1000000); err != nil {
+	//	log.Fatal("BatchInsertCustomers:", err)
+	//}
 
 	// Вставка 2 миллиона счетов для клиентов
 	// if err := BatchInsertAccounts(2000000, 1000000); err != nil {
@@ -70,6 +70,26 @@ func BatchUserLog(data [][]any) {
 	}
 }
 
+/*
+
+CREATE TABLE customers(
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    birthdate DATE,
+    id      BIGSERIAL PRIMARY KEY,
+    name    TEXT NOT NULL,
+    email   TEXT NOT NULL,
+    phone   TEXT,
+    address TEXT,
+    passport TEXT,
+    chat JSONB
+);
+CREATE INDEX idx_customers_chat_gin
+ON customers USING GIN (chat)
+WHERE chat IS NOT NULL;
+
+chat - JSONB поле для хранения информации о чатах с клиентом (Telegram, WhatsApp и т.д.) "ids":["234234sdfg","tg:asdf:alif", "test:3435"]
+*/
+
 // BatchInsertCustomers выполняет массовую вставку клиентов
 func BatchInsertCustomers(count int) error {
 	log.Printf("Начало вставки %d клиентов...", count)
@@ -85,6 +105,14 @@ func BatchInsertCustomers(count int) error {
 		data := make([][]any, end-i)
 		for j := i; j < end; j++ {
 			birthdate := time.Date(1950+rand.Intn(60), time.Month(1+rand.Intn(12)), 1+rand.Intn(28), 0, 0, 0, 0, time.UTC)
+
+			var chat any
+			if rand.Intn(2) == 0 {
+				chat = nil
+			} else {
+				chat = fmt.Sprintf(`{"ids": ["%d", "tg:%d"]}`, rand.Intn(100000), j+1)
+			}
+
 			data[j-i] = []any{
 				birthdate,
 				fmt.Sprintf("Customer %d", j+1),
@@ -92,13 +120,14 @@ func BatchInsertCustomers(count int) error {
 				fmt.Sprintf("+992%09d", j+1),
 				fmt.Sprintf("Address %d, Street %d", j+1, rand.Intn(100)),
 				fmt.Sprintf("AA%07d", j+1),
+				chat,
 			}
 		}
 
 		cnt, err := masterDB.CopyFrom(
 			context.Background(),
 			pgx.Identifier{"customers"},
-			[]string{"birthdate", "name", "email", "phone", "address", "passport"},
+			[]string{"birthdate", "name", "email", "phone", "address", "passport", "chat"},
 			pgx.CopyFromRows(data),
 		)
 		if err != nil {
@@ -393,6 +422,7 @@ func run1(ctx context.Context, senderID int64, beneficiaryID int64, amount float
 	if err != nil {
 		// для нагрузки можно просто логировать и продолжать
 		log.Printf("worker %d, op %f error: %v", senderID, amount, err)
+	} else {
+		log.Printf("worker %d finished all %f operations in %v", senderID, amount, time.Since(tm))
 	}
-	log.Printf("worker %d finished all %f operations in %v", senderID, amount, time.Since(tm))
 }

@@ -22,8 +22,12 @@ CREATE TABLE customers(
     email   TEXT NOT NULL,
     phone   TEXT,
     address TEXT,
-    passport TEXT
+    passport TEXT,
+    chat JSONB
 );
+CREATE INDEX idx_customers_chat_gin
+ON customers USING GIN (chat)
+WHERE chat IS NOT NULL;
 
 CREATE TABLE payment_orders2(
     created_at                  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
