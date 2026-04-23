@@ -18,7 +18,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var err error
-	masterDB, err = pgxpool.New(ctx, "postgres://temporal:temporal@localhost:5432/tsdb")
+	masterDB, err = pgxpool.New(ctx, "postgres://postgres:pass123@192.168.215.2:5432/ttdb")
 	if err != nil {
 		log.Println("pgxpool.New (master):", err)
 		return
@@ -49,9 +49,13 @@ func main() {
 	//}
 
 	// Выполнение параллельных транзакций
-	go run1(ctx, 48, 47, 20.00, "RUB")
-	go run1(ctx, 47, 50, 100.00, "RUB")
+	//go run1(ctx, 48, 47, 20.00, "RUB")
+	//go run1(ctx, 47, 50, 100.00, "RUB")
 
+	err = BatchInsertPayments(1000000)
+	if err != nil {
+		log.Fatal("BatchInsertPayments:", err)
+	}
 	//RunParallelTransactions(10, 50, 5000)
 	time.Sleep(5 * time.Second)
 	log.Println("Готово!")
@@ -426,3 +430,126 @@ func run1(ctx context.Context, senderID int64, beneficiaryID int64, amount float
 		log.Printf("worker %d finished all %f operations in %v", senderID, amount, time.Since(tm))
 	}
 }
+
+/*
+CREATE TABLE payments(
+    created_at                  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    pay_date                    DATE DEFAULT CURRENT_DATE,
+    id                          UUID  DEFAULT uuidv7(),
+    amount                      NUMERIC(18, 2) NOT NULL,
+    status                      SMALLINT DEFAULT 1, -- e.g., 1 - created, 2 - processing, 3 - completed, 4 - failed
+    error_code                  SMALLINT,
+    currency_code               CHAR(3) NOT NULL,
+    service_name                TEXT NOT NULL,
+    reference_number            TEXT NOT NULL,
+    info                        JSONB,
+    PRIMARY KEY (id, pay_date)
+) WITH (
+    tsdb.hypertable,
+    tsdb.partition_column = 'pay_date',
+    tsdb.create_default_indexes = false,
+    tsdb.segmentby        = 'service_name',
+    tsdb.orderby          = 'pay_date DESC'
+);
+
+-- create unique index on service_name, reference_number and pay_date
+-- to ensure uniqueness of reference numbers per service per day so in doc API we can enforce this constraint and mention it in API docs
+CREATE UNIQUE INDEX idx_payment_service_ref_num ON payments(service_name, reference_number, pay_date);
+
+*/
+
+// BatchInsertPayments выполняет массовую вставку платежей в hypertable payments
+// Распределяет записи по датам от 1 августа до 1 декабря 2025
+func BatchInsertPayments(count int) error {
+	log.Printf("Начало вставки %d платежей...", count)
+	start := time.Now()
+
+	currencies := []string{"USD", "EUR", "UZS", "RUB", "TJS"}
+	serviceNames := []string{"mobile_top_up", "utility_bills", "internet", "tv_subscription", "insurance", "loan_repayment"}
+	statuses := []int16{1, 2, 3, 4} // created, processing, completed, failed
+	errorCodes := []int16{0, 1001, 1002, 2001, 3001}
+
+	// Диапазон дат: с 1 августа по 1 декабря 2025
+	startDate := time.Date(2025, 8, 1, 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)
+	daysDiff := int(endDate.Sub(startDate).Hours() / 24)
+
+	batchSize := 10000
+	for i := 0; i < count; i += batchSize {
+		end := i + batchSize
+		if end > count {
+			end = count
+		}
+
+		data := make([][]any, end-i)
+		for j := i; j < end; j++ {
+			// Случайная дата в указанном диапазоне
+			randomDays := rand.Intn(daysDiff + 1)
+			payDate := startDate.AddDate(0, 0, randomDays)
+
+			// created_at и updated_at в тот же день, но со случайным временем
+			createdAt := payDate.Add(time.Duration(rand.Intn(86400)) * time.Second)
+			updatedAt := createdAt.Add(time.Duration(rand.Intn(3600)) * time.Second)
+
+			serviceName := serviceNames[rand.Intn(len(serviceNames))]
+			currencyCode := currencies[rand.Intn(len(currencies))]
+			amount := float64(rand.Intn(100000)) + rand.Float64()*100
+			status := statuses[rand.Intn(len(statuses))]
+
+			// Уникальный reference_number для каждой комбинации service_name и pay_date
+			referenceNumber := fmt.Sprintf("PAY-%s-%d-%d", serviceName, payDate.Unix(), j+1)
+
+			// error_code только для failed статусов
+			var errorCode any
+			if status == 4 {
+				errorCode = errorCodes[1+rand.Intn(len(errorCodes)-1)]
+			} else {
+				errorCode = nil
+			}
+
+			// info - JSONB поле, иногда null
+			var info any
+			if rand.Intn(3) == 0 {
+				info = nil
+			} else {
+				info = fmt.Sprintf(`{"customer_id": %d, "provider": "provider_%d"}`, rand.Intn(1000000), rand.Intn(100))
+			}
+
+			data[j-i] = []any{
+				createdAt,
+				updatedAt,
+				payDate,
+				amount,
+				status,
+				errorCode,
+				currencyCode,
+				serviceName,
+				referenceNumber,
+				info,
+			}
+		}
+
+		cnt, err := masterDB.CopyFrom(
+			context.Background(),
+			pgx.Identifier{"payments"},
+			[]string{"created_at", "updated_at", "pay_date", "amount", "status", "error_code",
+				"currency_code", "service_name", "reference_number", "info"},
+			pgx.CopyFromRows(data),
+		)
+		if err != nil {
+			return fmt.Errorf("CopyFrom payments error: %w", err)
+		}
+		if int64(len(data)) != cnt {
+			return fmt.Errorf("expected to insert %d rows, but inserted %d", len(data), cnt)
+		}
+
+		if (i+batchSize)%100000 == 0 || end == count {
+			log.Printf("Вставлено платежей: %d/%d", end, count)
+		}
+	}
+
+	log.Printf("Вставка %d платежей завершена за %v", count, time.Since(start))
+	return nil
+}
+
